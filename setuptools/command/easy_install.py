@@ -135,7 +135,8 @@ class easy_install(Command):
          "allow building eggs from local checkouts"),
         ('version', None, "print version information and exit"),
         ('no-find-links', None,
-         "Don't load find-links defined in packages being installed")
+         "Don't load find-links defined in packages being installed"),
+        ('script-writer=', None, 'python path to a ScriptWriter class'),
     ]
     boolean_options = [
         'zip-ok', 'multi-version', 'exclude-scripts', 'upgrade', 'always-copy',
@@ -167,6 +168,7 @@ class easy_install(Command):
         self.optimize = self.record = None
         self.upgrade = self.always_copy = self.multi_version = None
         self.editable = self.no_deps = self.allow_hosts = None
+        self.script_writer = None
         self.root = self.prefix = self.no_report = None
         self.version = None
         self.install_purelib = None  # for pure module distributions
@@ -748,7 +750,7 @@ class easy_install(Command):
 
     def install_wrapper_scripts(self, dist):
         if not self.exclude_scripts:
-            for args in ScriptWriter.best().get_args(dist):
+            for args in ScriptWriter.best(self.script_writer).get_args(dist):
                 self.write_script(*args)
 
     def install_script(self, dist, script_name, script_text, dev_path=None):
@@ -2036,11 +2038,27 @@ class ScriptWriter(object):
         return WindowsScriptWriter.best() if force_windows else cls.best()
 
     @classmethod
-    def best(cls):
+    def best(cls, script_writer=None):
         """
         Select the best ScriptWriter for this environment.
         """
-        return WindowsScriptWriter.best() if sys.platform == 'win32' else cls
+        if script_writer:
+            writer = cls._get_override_script_writer(script_writer)
+            if writer:
+                return writer
+        if sys.platform == 'win32':
+            return WindowsScriptWriter.best()
+        return cls
+
+    @classmethod
+    def _get_override_script_writer(cls, script_writer):
+        try:
+            (module_name, klass) = script_writer.split(':')
+            __import__(module_name)
+            module = sys.modules[module_name]
+            return getattr(module, klass)
+        except ImportError:
+            pass
 
     @classmethod
     def _get_script_args(cls, type_, name, header, script_text):
